@@ -1,0 +1,603 @@
+#include <string.h>
+
+#include "lcd.h"
+
+#include "uart.h"
+
+
+void lcd_display(void);
+
+char pen_tag[] = "060067E061E0";
+
+char book_tag[] = "060066FDC855";
+
+
+char pen_count = 0, book_count = 0, rfid =0;
+
+int pen_price = 10, book_price = 50;
+
+int total_price = 0, no_of_items=0 , pen_tot=0, book_tot=0;
+
+char rfid_tag[13];
+
+void add_isr(void) __irq
+
+{
+
+
+
+    while ((IOPIN0 & (1 << 14)) == 0);
+
+    delay_milliseconds(100);
+
+
+    if (strcmp(rfid_tag, pen_tag) == 0)
+
+        pen_count++;
+
+    else if (strcmp(rfid_tag, book_tag) == 0)
+
+        book_count++;
+
+
+    lcd_display();
+
+    EXTINT |= (1 << 1);
+
+    VICVectAddr = 0;
+
+}
+
+
+void remove_isr(void) __irq
+
+{
+
+    while ((IOPIN0 & (1 << 15)) == 0);
+
+    delay_milliseconds(100);
+
+
+    if (strcmp(rfid_tag, pen_tag) == 0 && pen_count > 0)
+
+        pen_count--;
+
+    else if (strcmp(rfid_tag, book_tag) == 0 && book_count > 0)
+
+        book_count--;
+
+
+    lcd_display();
+
+    EXTINT |= (1 << 2);
+
+    VICVectAddr = 0;
+
+}
+
+void total_isr(void) __irq
+
+{
+
+
+
+    while ((IOPIN0 & (1 << 16)) == 0);
+
+    delay_milliseconds(100);
+total_price = pen_tot + book_tot;
+no_of_items = pen_count + book_count;
+lcd_cmd(0x01);
+lcd_cmd (0x80);
+lcd_str("total_Rs : ");
+lcd_int(total_price);
+lcd_cmd(0xc0);
+lcd_str("Total items:");
+lcd_int(no_of_items);
+EXTINT |= (1<<3);
+VICVectAddr = 0;
+
+}
+
+
+int main(void)
+
+{
+
+    lcd_init();
+
+    uart_config();
+
+
+    PINSEL1 |= (1 << 0);  
+
+PINSEL0 |= (2 << 28);
+PINSEL0 |= (1 << 31);
+
+    EXTINT = 0x07;
+
+    EXTMODE = 0x07;
+
+    EXTPOLAR = 0x00;
+
+    VICIntEnable |= (1<<14) | (1<<15) | (1<<16);
+
+    VICVectCntl0 = (1<<5) | 14;
+
+    VICVectAddr0 = (int)add_isr;
+
+    VICVectCntl1 = (1<<5) | 15;
+
+    VICVectAddr1 = (int)remove_isr;
+VICVectCntl2 = (1<<5) | 16;
+
+    VICVectAddr2 = (int)total_isr;
+    lcd_cmd(0x80);
+
+    lcd_str("SMART TROLLEY USING RFID");
+
+delay_seconds(5);
+
+lcd_cmd(0x01);
+lcd_cmd(0x80);
+
+lcd_str("Scan RFID Tag");
+
+delay_seconds(1);
+
+while (1)
+
+{
+
+    UARTRX_STRING(rfid_tag);      
+
+    UARTTX_STRING(rfid_tag);      
+
+
+    if (strcmp(rfid_tag, pen_tag) == 0)
+
+    {
+
+        rfid = 1;
+
+        pen_count = 1;
+
+        lcd_display();
+
+    }
+
+    else if (strcmp(rfid_tag, book_tag) == 0)
+
+    {
+
+        rfid = 2;
+
+        book_count = 1;
+
+        lcd_display();
+
+    }
+
+    else
+
+    {
+
+        lcd_cmd(0x01);
+
+delay_milliseconds(2);
+
+        lcd_str("Invalid Tag");
+
+        delay_seconds(2);
+
+        lcd_cmd(0x01);
+
+delay_milliseconds(2);
+
+    }
+
+ 
+
+    lcd_str("Scan RFID Tag");
+
+}
+
+}
+
+
+
+
+void lcd_display()
+
+{
+
+  lcd_cmd(0x01);
+
+delay_milliseconds(2);
+
+
+    if (rfid == 1)  
+
+    {
+
+   pen_tot = pen_count * pen_price;;
+
+        lcd_str("Item: Pen");
+
+        lcd_cmd(0xC0);
+
+        lcd_str("Qty: ");
+
+        lcd_int(pen_count);
+
+        lcd_str(" Rs: ");
+
+        lcd_int(pen_tot);
+
+    }
+
+    else if (rfid == 2)  
+
+    {
+
+book_tot = book_count * book_price;
+
+        lcd_str("Item: Book");
+
+        lcd_cmd(0xC0);
+
+        lcd_str("Qty: ");
+
+        lcd_int(book_count);
+
+        lcd_str(" Rs: ");
+
+        lcd_int(book_tot);
+
+    }
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+ #include<LPC21XX.H>
+
+#define rdr 0
+
+#define thre 5
+
+typedef unsigned char u8;
+
+void UARTRX_STRING(char*);
+
+void UARTTX_STRING(char*);
+
+void uart_config(void);
+
+void uart_tx(u8);
+
+u8 uart_rx(void);
+
+void uart_config(void)
+
+{
+
+PINSEL0|=0x05; // to set rx and tx for uart 0;
+
+U0LCR=0x83;// to enable dlab in lcr and 8bit data frame (8=dlab,3=8 bit frame)
+
+U0DLL=97;// to set baudrate
+
+U0LCR=0x03;// to disale the dlab in lcr
+
+}
+
+void uart_tx(u8 ch)
+
+{
+
+U0THR=ch;
+
+while(((U0LSR>>thre)&1)==0);
+
+}
+
+u8 uart_rx(void)
+
+{
+
+while(((U0LSR>>rdr)&1)==0);
+
+return U0RBR;
+
+}
+
+
+ void UARTRX_STRING(char*p)
+
+ {
+
+  unsigned int i;
+
+  for(i=0;i<12;i++)
+
+  p[i]=uart_rx();
+
+ }
+
+
+ void UARTTX_STRING(char*p)
+
+ {
+
+  unsigned int i;
+
+  for(i=0;i<12;i++)
+
+  uart_tx(p[i]);
+
+ }
+
+
+
+
+
+
+
+
+ #include <LPC21XX.H>
+
+#include "delay.h"
+
+
+#define LCD_D 0xf<<20
+
+#define RS 1<<17
+
+#define RW 1<<18
+
+#define E 1<<19
+
+
+void lcd_init (void);
+
+void lcd_cmd (unsigned char);
+
+void lcd_data (unsigned char);
+
+void lcd_str(char*);
+
+void lcd_int(int);
+
+
+void lcd_init(void)
+
+{
+
+IODIR1=LCD_D|RS|RW|E;
+
+IOCLR1=RW;
+
+lcd_cmd (0x01);
+
+lcd_cmd (0x02);
+
+lcd_cmd (0x0c);
+
+lcd_cmd (0x28);
+
+lcd_cmd (0x85);
+
+}
+
+
+void lcd_cmd(unsigned char cmd)
+
+{
+
+IOCLR1=LCD_D;
+
+IOSET1=(cmd&0xf0)<<16;
+
+IOCLR1=RS;
+
+IOSET1=E;
+
+delay_milliseconds(2);
+
+IOCLR1=E;
+
+
+IOCLR1=LCD_D;
+
+IOSET1=(cmd&0x0f)<<20;
+
+IOCLR1=RS;
+
+IOSET1=E;
+
+delay_milliseconds(2);
+
+IOCLR1=E;
+
+}
+
+
+void lcd_data (unsigned char data)
+
+{
+
+IOCLR1=LCD_D;
+
+IOSET1=(data&0xf0)<<16;
+
+IOSET1=RS;
+
+IOSET1=E;
+
+delay_milliseconds(2);
+
+IOCLR1=E;
+
+
+IOCLR1=LCD_D;
+
+IOSET1=(data&0x0f)<<20;
+
+IOSET1=RS;
+
+IOSET1=E;
+
+delay_milliseconds(2);
+
+IOCLR1=E;
+
+}
+
+void lcd_int(int n)
+
+{
+
+unsigned char a[7];
+
+signed char i=0;
+
+if(n==0)
+
+  lcd_data('0');
+
+else
+
+{
+
+  if(n<0)
+
+   {
+
+lcd_data('-');
+
+n=-n;
+
+}
+
+while(n>0)
+
+{
+
+a[i++]=n%10;
+
+n=n/10;
+
+}
+
+for(i=i-1;i>=0;i--)
+
+lcd_data(a[i]+48);
+lcd_data(' ');
+lcd_data(' ');
+
+}
+
+}
+
+
+void lcd_str(char* s)
+
+{
+
+int i=0;
+
+while(*s)
+
+{
+
+lcd_data(*s++);
+
+i++;
+
+if(i==16)
+
+{
+
+lcd_cmd(0xc0);
+
+}
+
+}
+
+}
+
+
+
+
+
+
+
+
+#include<LPC21XX.H>
+
+typedef unsigned int uint;
+
+void delay_seconds(uint);
+
+void delay_milliseconds(uint);
+
+void delay_microseconds(uint);
+
+
+void delay_seconds(uint s)
+
+{
+
+T0PR=15000000-1;
+
+T0TCR=0X01;
+
+while(T0TC<s);
+
+T0TCR=0X03;
+
+T0TCR=0X00;
+
+}
+
+void delay_milliseconds(uint ms)
+
+{
+
+T0PR=15000-1;
+
+T0TCR=0X01;
+
+while(T0TC<ms);
+
+T0TCR=0X03;
+
+T0TCR=0X00;
+
+}
+
+void delay_microseconds(uint mcs)
+
+{
+
+T0PR=15-1;
+
+T0TCR=0X01;
+
+while(T0TC<mcs);
+
+T0TCR=0X03;
+
+T0TCR=0X00;
+
+}
